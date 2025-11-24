@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>方塊設計師 D-etris</title>
+    <style>
+        /* --- 基礎設定 & 字型 --- */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;500;900&display=swap');
+
+        :root {
+            --bg-color-start: #1a2a4a;
+            --bg-color-end: #0a1525;
+            --glass-border: rgba(100, 180, 255, 0.5);
+            --accent-orange: #ff9900;
+            --accent-blue: #64b4ff;
+            --text-color: #ffffff;
+            --tilt-angle: -4deg; /* 傾斜角度 */
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            /* 使用圖一風格的深藍色背景 */
+            background: radial-gradient(circle at 50% 30%, var(--bg-color-start), var(--bg-color-end));
+            color: var(--text-color);
+            font-family: 'Noto Sans TC', sans-serif;
+            overflow: hidden; /* 防止捲動 */
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: filter 0.5s ease; /* 亮度變化的過渡效果 */
+        }
+
+        /* 雜訊紋理背景 (模擬海報質感) */
+        body::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            /* 使用圖一風格的紋理 */
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.1'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: -1;
+            mix-blend-mode: overlay;
+        }
+
+        /* --- 遊戲主容器 --- */
+        #game-layout {
+            position: relative;
+            display: flex;
+            flex-direction: row;
+            align-items: flex-end;
+            gap: 40px;
+            /* 整體佈局不旋轉，只旋轉棋盤，保持UI易讀 */
+        }
+
+        /* 左側：標題與分數 */
+        .info-panel {
+            text-align: right;
+            z-index: 10;
+            padding-bottom: 20px;
+            max-width: 300px;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            line-height: 1;
+            /* 增加藍色光暈 */
+            text-shadow: 0 0 20px rgba(100, 180, 255, 0.8), 0 0 40px rgba(100, 180, 255, 0.4);
+            color: var(--accent-blue);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            font-weight: 300;
+            opacity: 0.9;
+            margin-top: 10px;
+            margin-bottom: 40px;
+            border-right: 4px solid var(--accent-orange);
+            padding-right: 15px;
+            /* 增加藍色光暈 */
+            text-shadow: 0 0 10px rgba(100, 180, 255, 0.6);
+        }
+
+        .stats-box {
+            background: rgba(26, 42, 74, 0.5);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 10px;
+            /* 使用藍色邊框 */
+            border: 1px solid var(--glass-border);
+            margin-top: 20px;
+            /* 增加藍色光暈 */
+            box-shadow: 0 0 30px rgba(100, 180, 255, 0.3);
+        }
+
+        .stat-item {
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 1.1rem;
+        }
+        .stat-value {
+            font-weight: 900;
+            font-family: monospace;
+            /* 使用藍色文字 */
+            color: var(--accent-blue);
+            text-shadow: 0 0 10px rgba(100, 180, 255, 0.8);
+        }
+
+        /* --- 中間：傾斜的棋盤 --- */
+        .canvas-container {
+            position: relative;
+            /* 這裡設定傾斜，模擬海報視覺 */
+            transform: rotate(var(--tilt-angle));
+            transform-origin: center bottom;
+            padding: 15px;
+            background: rgba(10, 21, 37, 0.8);
+            border-radius: 8px;
+            /* 強烈的藍色發光邊框，模擬圖一的立方體 */
+            box-shadow: 0 0 40px rgba(100, 180, 255, 0.6), inset 0 0 20px rgba(100, 180, 255, 0.4);
+            border: 2px solid var(--glass-border);
+            transition: transform 0.3s ease;
+        }
+        
+        /* 稍微加一點 hover 互動，讓它感覺是活的 */
+        .canvas-container:hover {
+            transform: rotate(-2deg) scale(1.02);
+        }
+
+        canvas {
+            display: block;
+            background-color: rgba(5, 10, 20, 0.8);
+            border: 1px solid var(--glass-border);
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.8);
+        }
+
+        /* 開始/結束 覆蓋層 */
+        #overlay {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(10, 21, 37, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            backdrop-filter: blur(5px);
+            /* 覆蓋層也要跟著傾斜，不然會穿幫 */
+            transform: rotate(0deg); 
+        }
+        /* 因為 canvas container 已經轉了，overlay在裡面不需要再轉，
+           或者如果 overlay 在外面，就需要轉。這裡我把它放在 canvas-container 裡。
+        */
+
+        #overlay h2 {
+            font-size: 2.5rem;
+            color: var(--accent-orange);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 5px;
+            text-shadow: 0 0 20px var(--accent-orange);
+        }
+        
+        button {
+            background: transparent;
+            color: var(--accent-blue);
+            border: 2px solid var(--accent-blue);
+            padding: 10px 30px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Noto Sans TC', sans-serif;
+            font-weight: 900;
+            text-shadow: 0 0 10px var(--accent-blue);
+            box-shadow: 0 0 10px rgba(100, 180, 255, 0.4);
+        }
+        button:hover {
+            background: var(--accent-blue);
+            color: #0a1525;
+            box-shadow: 0 0 20px rgba(100, 180, 255, 0.8);
+        }
+
+        /* 右側裝飾：操作說明 */
+        .controls-help {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transform: rotate(var(--tilt-angle)); /* 跟著傾斜一點 */
+            margin-left: 20px;
+            text-shadow: 0 0 5px rgba(100, 180, 255, 0.6);
+        }
+        .key {
+            display: inline-block;
+            border: 1px solid var(--glass-border);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-right: 5px;
+            font-size: 0.8rem;
+            color: var(--accent-blue);
+        }
+
+        /* RWD for Mobile */
+        @media (max-width: 768px) {
+            #game-layout {
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+                transform: scale(0.8);
+            }
+            .info-panel {
+                text-align: center;
+                padding-bottom: 0;
+            }
+            .subtitle {
+                border-right: none;
+                border-bottom: 3px solid var(--accent-orange);
+                padding-right: 0;
+                padding-bottom: 10px;
+                margin-bottom: 20px;
+            }
+            .controls-help {
+                display: none; /* 手機版隱藏鍵盤說明 */
+            }
+            
+            /* 簡單的手機控制按鈕 */
+            #mobile-controls {
+                display: flex !important;
+                gap: 15px;
+                margin-top: 10px;
+                z-index: 100;
+            }
+        }
+
+        #mobile-controls {
+            display: none;
+        }
+        .m-btn {
+            width: 50px; height: 50px;
+            background: rgba(100, 180, 255, 0.2);
+            border: 1px solid var(--glass-border);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            user-select: none;
+            color: var(--accent-blue);
+            text-shadow: 0 0 5px var(--accent-blue);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-layout">
+        
+        <!-- 左側資訊 -->
+        <div class="info-panel">
+            <h1>D-etris</h1>
+            <div class="subtitle">在傾斜的方格裡，<br>我們定義設計的引力。</div>
+            
+            <div class="stats-box">
+                <div class="stat-item">SCORE <span id="score" class="stat-value">0</span></div>
+                <div class="stat-item">LINES <span id="lines" class="stat-value">0</span></div>
+                <div class="stat-item">LEVEL <span id="level" class="stat-value">1</span></div>
+            </div>
+        </div>
+
+        <!-- 中間遊戲區 -->
+        <div class="canvas-container">
+            <canvas id="tetris" width="300" height="600"></canvas>
+            
+            <!-- 覆蓋層：開始/暫停/結束 -->
+            <div id="overlay">
+                <h2 id="overlay-title">READY?</h2>
+                <button id="start-btn" onclick="startGame()">START DESIGN</button>
+            </div>
+        </div>
+
+        <!-- 右側說明 (裝飾) -->
+        <div class="controls-help">
+            <div><span class="key">←</span> <span class="key">→</span> 移動</div>
+            <div><span class="key">↑</span> 旋轉</div>
+            <div><span class="key">↓</span> 加速</div>
+            <div><span class="key">SPACE</span> 落下</div>
+        </div>
+
+    </div>
+
+    <!-- 手機版控制 -->
+    <div id="mobile-controls">
+        <div class="m-btn" onclick="playerRotate(1)">↻</div>
+        <div class="m-btn" onclick="playerMove(-1)">←</div>
+        <div class="m-btn" onclick="playerMove(1)">→</div>
+        <div class="m-btn" onclick="playerDrop()">↓</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('tetris');
+        const context = canvas.getContext('2d');
+        
+        // 擴大畫面比例 (Retina fix)
+        context.scale(30, 30);
+
+        // 遊戲狀態變數
+        let dropCounter = 0;
+        let dropInterval = 1000;
+        let lastTime = 0;
+        let score = 0;
+        let lines = 0;
+        let level = 1;
+        let gameActive = false;
+        
+        // 設計感亮度 (每消一行增加亮度)
+        let globalBrightness = 100; // %
+
+        // --- 音效處理 ---
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (!gameActive && type !== 'gameOver') return;
+
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            let duration = 0.1;
+            let frequency = 440;
+            let volume = 0.2;
+            
+            switch(type) {
+                case 'move':
+                    frequency = 300;
+                    duration = 0.05;
+                    oscillator.type = 'square';
+                    break;
+                case 'rotate':
+                    frequency = 400;
+                    duration = 0.08;
+                    oscillator.type = 'triangle';
+                    break;
+                case 'drop':
+                    frequency = 200;
+                    duration = 0.05;
+                    oscillator.type = 'sawtooth';
+                    break;
+                case 'hardDrop':
+                    frequency = 150;
+                    duration = 0.15;
+                    oscillator.type = 'sawtooth';
+                    volume = 0.3;
+                    break;
+                case 'clear':
+                    frequency = 600;
+                    duration = 0.3;
+                    oscillator.type = 'sine';
+                    volume = 0.4;
+                    // 簡單的和弦效果
+                    const oscillator2 = audioContext.createOscillator();
+                    oscillator2.frequency.setValueAtTime(800, audioContext.currentTime);
+                    oscillator2.type = 'sine';
+                    oscillator2.connect(gainNode);
+                    oscillator2.start();
+                    oscillator2.stop(audioContext.currentTime + duration);
+                    break;
+                case 'gameOver':
+                    frequency = 100;
+                    duration = 1.0;
+                    oscillator.type = 'sawtooth';
+                    volume = 0.5;
+                    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                    break;
+            }
+            
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+
+        // --- 方塊定義 ---
+        // 顏色設定：半透明玻璃感
+        // 特別注意：矩陣的最後一個 (index 7) 我們將設為「橘色設計師方塊」
+        // 這裡用 'O' (方形) 作為設計師方塊，對應海報中的橘色窗口
+        const colors = [
+            null,
+            'rgba(255, 80, 80, 0.8)',    // T - 紅
+            'rgba(80, 255, 80, 0.8)',    // Z - 綠
+            'rgba(80, 80, 255, 0.8)',    // J - 藍
+            'rgba(240, 240, 255, 0.9)',  // O - 橘色 (主角！) -> 實際上邏輯對應 type 4
+            'rgba(80, 255, 255, 0.8)',   // I - 青
+            'rgba(255, 80, 255, 0.8)',   // S - 紫
+            'rgba(255, 160, 0, 0.95)',   // L - 橘 (備用)
+        ];
+
+        // 方塊形狀
+        function createPiece(type) {
+            if (type === 'I') {
+                return [
+                    [0, 1, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 1, 0, 0],
+                ];
+            } else if (type === 'L') {
+                return [
+                    [0, 2, 0],
+                    [0, 2, 0],
+                    [0, 2, 2],
+                ];
+            } else if (type === 'J') {
+                return [
+                    [0, 3, 0],
+                    [0, 3, 0],
+                    [3, 3, 0],
+                ];
+            } else if (type === 'O') {
+                // 這是我們的主角：方塊設計師 (橘色)
+                return [
+                    [4, 4],
+                    [4, 4],
+                ];
+            } else if (type === 'Z') {
+                return [
+                    [5, 5, 0],
+                    [0, 5, 5],
+                    [0, 0, 0],
+                ];
+            } else if (type === 'S') {
+                return [
+                    [0, 6, 6],
+                    [6, 6, 0],
+                    [0, 0, 0],
+                ];
+            } else if (type === 'T') {
+                return [
+                    [0, 7, 0],
+                    [7, 7, 7],
+                    [0, 0, 0],
+                ];
+            }
+        }
+
+        function createMatrix(w, h) {
+            const matrix = [];
+            while (h--) {
+                matrix.push(new Array(w).fill(0));
+            }
+            return matrix;
+        }
+
+        // --- 繪圖 ---
+        function draw() {
+            // 清除畫布 (這裡不用 clearRect，因為要畫背景格線)
+            // 使用深藍色背景
+            context.fillStyle = 'rgba(5, 10, 20, 0.9)';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 畫格線 (營造設計圖稿的感覺)
+            context.lineWidth = 0.05;
+            // 使用發光的藍色格線
+            context.strokeStyle = 'rgba(100, 180, 255, 0.2)';
+            context.shadowBlur = 5;
+            context.shadowColor = 'rgba(100, 180, 255, 0.5)';
+            
+            for (let i = 0; i <= 10; i++) {
+                context.beginPath(); context.moveTo(i, 0); context.lineTo(i, 20); context.stroke();
+            }
+            for (let j = 0; j <= 20; j++) {
+                context.beginPath(); context.moveTo(0, j); context.lineTo(10, j); context.stroke();
+            }
+            
+            // Reset shadow
+            context.shadowBlur = 0;
+
+            drawMatrix(arena, {x: 0, y: 0});
+            drawMatrix(player.matrix, player.pos);
+        }
+
+        function drawMatrix(matrix, offset) {
+            // 修正錯誤：檢查 matrix 是否存在
+            if (!matrix) return;
+
+            matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        const isDesignerBlock = (value === 4);
+                        const px = x + offset.x;
+                        const py = y + offset.y;
+
+                        if (isDesignerBlock) {
+                            // 發光的橘色設計師方塊
+                            context.fillStyle = '#ff9900';
+                            context.shadowBlur = 20;
+                            context.shadowColor = '#ff9900';
+                            context.fillRect(px, py, 1, 1);
+                            
+                            // 邊框
+                            context.lineWidth = 0.08;
+                            context.strokeStyle = 'rgba(255, 200, 100, 0.8)';
+                            context.strokeRect(px, py, 1, 1);
+
+                            // 設計師剪影 (發光的橘色)
+                            context.fillStyle = '#ffcc00';
+                            context.shadowBlur = 5;
+                            context.fillRect(px + 0.3, py + 0.3, 0.4, 0.4); 
+                        } else {
+                            // 一般方塊 (參考圖一的藍色半透明立方體)
+                            const blueHue = 200 + (value * 15); 
+                            // 使用線性漸層模擬立體感
+                            const gradient = context.createLinearGradient(px, py, px + 1, py + 1);
+                            gradient.addColorStop(0, `hsla(${blueHue}, 80%, 60%, 0.9)`);
+                            gradient.addColorStop(1, `hsla(${blueHue}, 80%, 40%, 0.9)`);
+                            context.fillStyle = gradient;
+                            
+                            // 藍色光暈
+                            context.shadowBlur = 10;
+                            context.shadowColor = `hsla(${blueHue}, 80%, 60%, 0.6)`;
+                            context.fillRect(px, py, 1, 1);
+
+                            // 金屬質感邊框 (內發光)
+                            context.lineWidth = 0.08;
+                            context.strokeStyle = `hsla(${blueHue}, 90%, 80%, 0.7)`;
+                            context.strokeRect(px, py, 1, 1);
+                        }
+                        
+                        // Reset shadow for subsequent draws
+                        context.shadowBlur = 0;
+                    }
+                });
+            });
+        }
+
+        // --- 遊戲邏輯 ---
+        function arenaSweep() {
+            let rowCount = 1;
+            let cleared = false;
+            outer: for (let y = arena.length - 1; y > 0; --y) {
+                for (let x = 0; x < arena[y].length; ++x) {
+                    if (arena[y][x] === 0) {
+                        continue outer;
+                    }
+                }
+
+                const row = arena.splice(y, 1)[0].fill(0);
+                arena.unshift(row);
+                ++y;
+
+                score += rowCount * 10;
+                rowCount *= 2;
+                lines++;
+                cleared = true;
+                
+                // 視覺特效：增加背景亮度
+                globalBrightness = Math.min(globalBrightness + 5, 150);
+                document.body.style.filter = `brightness(${globalBrightness}%)`;
+                
+                // 升級邏輯
+                if (lines % 5 === 0) {
+                    level++;
+                    dropInterval = Math.max(100, 1000 - (level * 50));
+                }
+            }
+            
+            if (cleared) {
+                playSound('clear');
+            }
+            updateScore();
+        }
+
+        function collide(arena, player) {
+            // 同樣檢查矩陣是否存在
+            if (!player.matrix) return false;
+            
+            const m = player.matrix;
+            const o = player.pos;
+            for (let y = 0; y < m.length; ++y) {
+                for (let x = 0; x < m[y].length; ++x) {
+                    if (m[y][x] !== 0 &&
+                       (arena[y + o.y] &&
+                        arena[y + o.y][x + o.x]) !== 0) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function merge(arena, player) {
+            if (!player.matrix) return;
+            
+            player.matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        arena[y + player.pos.y][x + player.pos.x] = value;
+                    }
+                });
+            });
+        }
+
+        function rotate(matrix, dir) {
+            for (let y = 0; y < matrix.length; ++y) {
+                for (let x = 0; x < y; ++x) {
+                    [
+                        matrix[x][y],
+                        matrix[y][x],
+                    ] = [
+                        matrix[y][x],
+                        matrix[x][y],
+                    ];
+                }
+            }
+            if (dir > 0) {
+                matrix.forEach(row => row.reverse());
+            } else {
+                matrix.reverse();
+            }
+        }
+
+        function playerDrop() {
+            player.pos.y++;
+            if (collide(arena, player)) {
+                player.pos.y--;
+                merge(arena, player);
+                playerReset();
+                arenaSweep();
+                updateScore();
+                playSound('drop');
+            }
+            dropCounter = 0;
+        }
+        
+        // 瞬間落下 (Hard Drop)
+        function playerHardDrop() {
+            // 如果玩家還沒開始或結束了，不做動作
+            if (!player.matrix) return;
+
+            while (!collide(arena, player)) {
+                player.pos.y++;
+            }
+            player.pos.y--; // Back up one step
+            merge(arena, player);
+            playerReset();
+            arenaSweep();
+            updateScore();
+            dropCounter = 0;
+            playSound('hardDrop');
+        }
+
+        function playerMove(dir) {
+            if (!player.matrix) return;
+            
+            player.pos.x += dir;
+            if (collide(arena, player)) {
+                player.pos.x -= dir;
+            } else {
+                playSound('move');
+            }
+        }
+
+        function playerReset() {
+            const pieces = 'TJLOSZI'; // 7 shapes
+            // 隨機產生
+            const type = pieces[pieces.length * Math.random() | 0];
+            player.matrix = createPiece(type);
+            player.pos.y = 0;
+            player.pos.x = (arena[0].length / 2 | 0) -
+                           (player.matrix[0].length / 2 | 0);
+            
+            // Game Over Check
+            if (collide(arena, player)) {
+                gameActive = false;
+                document.getElementById('overlay').style.display = 'flex';
+                document.getElementById('overlay-title').innerText = "GAME OVER";
+                document.getElementById('start-btn').innerText = "TRY AGAIN";
+                player.matrix = null; // 清空以避免意外繪製
+                playSound('gameOver');
+            }
+        }
+
+        function playerRotate(dir) {
+            if (!player.matrix) return;
+            
+            const pos = player.pos.x;
+            let offset = 1;
+            rotate(player.matrix, dir);
+            while (collide(arena, player)) {
+                player.pos.x += offset;
+                offset = -(offset + (offset > 0 ? 1 : -1));
+                if (offset > player.matrix[0].length) {
+                    rotate(player.matrix, -dir);
+                    player.pos.x = pos;
+                    return;
+                }
+            }
+            playSound('rotate');
+        }
+
+        function updateScore() {
+            document.getElementById('score').innerText = score;
+            document.getElementById('lines').innerText = lines;
+            document.getElementById('level').innerText = level;
+        }
+        
+        // 主迴圈
+        function update(time = 0) {
+            if (!gameActive) return;
+
+            const deltaTime = time - lastTime;
+            lastTime = time;
+
+            dropCounter += deltaTime;
+            if (dropCounter > dropInterval) {
+                playerDrop();
+            }
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        // 遊戲初始化
+        const arena = createMatrix(10, 20);
+        const player = {
+            pos: {x: 0, y: 0},
+            matrix: null,
+            score: 0,
+        };
+
+        function startGame() {
+            // 在使用者互動後恢復 AudioContext
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            // Reset state
+            arena.forEach(row => row.fill(0));
+            score = 0;
+            lines = 0;
+            level = 1;
+            globalBrightness = 100;
+            dropInterval = 1000;
+            updateScore();
+            document.body.style.filter = `brightness(100%)`;
+            
+            gameActive = true;
+            document.getElementById('overlay').style.display = 'none';
+            playerReset();
+            update();
+        }
+
+        // 鍵盤控制
+        document.addEventListener('keydown', event => {
+            if (!gameActive) {
+                if (event.keyCode === 13) startGame(); // Enter to start
+                return;
+            }
+            
+            if (event.keyCode === 37) { // Left
+                playerMove(-1);
+            } else if (event.keyCode === 39) { // Right
+                playerMove(1);
+            } else if (event.keyCode === 40) { // Down
+                playerDrop();
+            } else if (event.keyCode === 38) { // Up (Rotate)
+                playerRotate(1);
+            } else if (event.keyCode === 32) { // Space (Hard Drop)
+                event.preventDefault(); // 防止捲動頁面
+                playerHardDrop();
+            }
+        });
+        
+        // 初始畫面繪製一次背景
+        draw();
+
+    </script>
+</body>
+</html>
